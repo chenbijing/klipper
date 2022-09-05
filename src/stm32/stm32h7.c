@@ -84,8 +84,13 @@ static void
 clock_setup(void)
 {
     // Ensure USB OTG ULPI is not enabled
+    #if defined STM32H723xx
+    CLEAR_BIT(RCC->AHB1ENR, RCC_AHB1ENR_USB1OTGHSULPIEN);
+    CLEAR_BIT(RCC->AHB1LPENR, RCC_AHB1LPENR_USB1OTGHSULPILPEN);
+    #else
     CLEAR_BIT(RCC->AHB1ENR, RCC_AHB1ENR_USB2OTGHSULPIEN);
     CLEAR_BIT(RCC->AHB1LPENR, RCC_AHB1LPENR_USB2OTGHSULPILPEN);
+    #endif
 
     // Set this despite correct defaults.
     // "The software has to program the supply configuration in PWR control
@@ -143,7 +148,11 @@ clock_setup(void)
     // Enable VOS0 (overdrive)
     if (CONFIG_CLOCK_FREQ > 400000000) {
         RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
+        #if defined STM32H723xx
+        PWR->CR3 |= PWR_CR3_BYPASS;
+        #else
         SYSCFG->PWRCR |= SYSCFG_PWRCR_ODEN;
+        #endif
         while (!(PWR->D3CR & PWR_D3CR_VOSRDY))
             ;
     }

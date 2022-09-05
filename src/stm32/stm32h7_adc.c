@@ -13,6 +13,13 @@
 #include "internal.h" // GPIO
 #include "sched.h" // sched_shutdown
 
+
+#ifdef STM32H723xx
+    #define STM32H723_ADC  1
+#else
+    #define STM32H723_ADC  0
+#endif
+
 // Number of samples is 2^OVERSAMPLES_EXPONENT (exponent can be 0-10)
 #define OVERSAMPLES_EXPONENT 3
 #define OVERSAMPLES (1 << OVERSAMPLES_EXPONENT)
@@ -104,18 +111,19 @@ gpio_adc_setup(uint32_t pin)
 {
     // Find pin in adc_pins table
     int chan;
+    uint32_t adc3flg=0;
     for (chan=0; ; chan++) {
         if (chan >= ARRAY_SIZE(adc_pins))
             shutdown("Not a valid ADC pin");
         if (adc_pins[chan] == pin)
             break;
     }
-
     // Determine which ADC block to use, enable peripheral clock
     // (SYSCLK 480Mhz) /HPRE(2) /CKMODE divider(4) /additional divider(2)
     // (ADC clock 30Mhz)
     ADC_TypeDef *adc;
-    if (chan >= 40){
+    if (chan >= 40){   
+        adc3flg = 1;   
         adc = ADC3;
         if (!is_enabled_pclock(ADC3_BASE)) {
             enable_pclock(ADC3_BASE);
@@ -142,16 +150,32 @@ gpio_adc_setup(uint32_t pin)
         MODIFY_REG(adc->CR, ADC_CR_DEEPPWD_Msk, 0);
         // Switch on voltage regulator
         adc->CR |= ADC_CR_ADVREGEN;
-        while(!(adc->ISR & ADC_ISR_LDORDY))
-            ;
-        // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
-        MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);
 
+        if (!adc3flg)
+        {
+            while(!(adc->ISR & ADC_ISR_LDORDY))
+                ;
+            // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
+            MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);
+        }
+        else
+        {
+        #ifndef STM32H723xx
+            while(!(adc->ISR & ADC_ISR_LDORDY))
+                ;
+            // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
+            MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);     
+        #endif
+
+        }
         // Calibration
         // Set calibration mode to Single ended (not differential)
         MODIFY_REG(adc->CR, ADC_CR_ADCALDIF_Msk, 0);
+
         // Enable linearity calibration
-        MODIFY_REG(adc->CR, ADC_CR_ADCALLIN_Msk, ADC_CR_ADCALLIN);
+        #ifndef STM32H723xx
+            MODIFY_REG(adc->CR, ADC_CR_ADCALLIN_Msk, ADC_CR_ADCALLIN);
+        #endif
         // Start the calibration
         MODIFY_REG(adc->CR, ADC_CR_ADCAL_Msk, ADC_CR_ADCAL);
         while(adc->CR & ADC_CR_ADCAL)
@@ -161,12 +185,13 @@ gpio_adc_setup(uint32_t pin)
         // "Clear the ADRDY bit in the ADC_ISR register by writing ‘1’"
         adc->ISR |= ADC_ISR_ADRDY;
         adc->CR |= ADC_CR_ADEN;
+
         while(!(adc->ISR & ADC_ISR_ADRDY))
            ;
 
         // Set 64.5 ADC clock cycles sample time for every channel
         // (Reference manual pg.940)
-        uint32_t aticks = 0b101;
+        uint32_t aticks = 0b101;        
         // Channel 0-9
         adc->SMPR1 = (aticks        | (aticks << 3)  | (aticks << 6)
                    | (aticks << 9)  | (aticks << 12) | (aticks << 15)
@@ -179,14 +204,42 @@ gpio_adc_setup(uint32_t pin)
                    | (aticks << 27));
         // Disable Continuous Mode
         MODIFY_REG(adc->CFGR, ADC_CFGR_CONT_Msk, 0);
-        // Set to 12 bit
-        MODIFY_REG(adc->CFGR, ADC_CFGR_RES_Msk, 0b110 << ADC_CFGR_RES_Pos);
-        // Set hardware oversampling
-        MODIFY_REG(adc->CFGR2, ADC_CFGR2_ROVSE_Msk, ADC_CFGR2_ROVSE);
-        MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSR_Msk,
-            (OVERSAMPLES - 1) << ADC_CFGR2_OVSR_Pos);
-        MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSS_Msk,
-            OVERSAMPLES_EXPONENT << ADC_CFGR2_OVSS_Pos);
+
+        if (!adc3flg)
+        {
+            // Set to 12 bit
+            MODIFY_REG(adc->CFGR, ADC_CFGR_RES_Msk, 0b110 << ADC_CFGR_RES_Pos);
+            //Set hardware oversampling
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_ROVSE_Msk, ADC_CFGR2_ROVSE);
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSR_Msk,
+                (OVERSAMPLES - 1) << ADC_CFGR2_OVSR_Pos);
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSS_Msk,
+                OVERSAMPLES_EXPONENT << ADC_CFGR2_OVSS_Pos);
+        }
+        else
+        {
+        #if defined STM32H723xx
+            // Set to 12 bit
+            MODIFY_REG(adc->CFGR, ADC3_CFGR_RES_Msk, 0 << ADC3_CFGR_RES_Pos);  
+            MODIFY_REG(adc->CFGR, ADC3_CFGR_ALIGN_Msk, 0 << ADC3_CFGR_ALIGN_Pos); 
+            // Set hardware oversampling
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_ROVSE_Msk, ADC_CFGR2_ROVSE);
+
+            MODIFY_REG(adc->CFGR2, ADC3_CFGR2_OVSR_Msk, 
+                            0b010 << ADC3_CFGR2_OVSR_Pos);
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSS_Msk,
+                                    0b0011 << ADC_CFGR2_OVSS_Pos);
+        #else
+            // Set to 12 bit
+            MODIFY_REG(adc->CFGR, ADC_CFGR_RES_Msk, 0b110 << ADC_CFGR_RES_Pos);
+            //Set hardware oversampling
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_ROVSE_Msk, ADC_CFGR2_ROVSE);
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSR_Msk,
+                (OVERSAMPLES - 1) << ADC_CFGR2_OVSR_Pos);
+            MODIFY_REG(adc->CFGR2, ADC_CFGR2_OVSS_Msk,
+                OVERSAMPLES_EXPONENT << ADC_CFGR2_OVSS_Pos);        
+        #endif
+        }   
     }
 
     if (pin == ADC_TEMPERATURE_PIN) {
@@ -196,7 +249,12 @@ gpio_adc_setup(uint32_t pin)
     }
 
     // Preselect (connect) channel
-    adc->PCSEL |= (1 << chan);
+    #if defined STM32H723xx
+        adc->PCSEL_RES0|= (1 << chan);
+    #else
+        adc->PCSEL |= (1 << chan);
+    #endif
+
     return (struct gpio_adc){ .adc = adc, .chan = chan };
 }
 
