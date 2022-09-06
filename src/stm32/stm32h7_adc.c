@@ -14,12 +14,6 @@
 #include "sched.h" // sched_shutdown
 
 
-#ifdef STM32H723xx
-    #define STM32H723_ADC  1
-#else
-    #define STM32H723_ADC  0
-#endif
-
 // Number of samples is 2^OVERSAMPLES_EXPONENT (exponent can be 0-10)
 #define OVERSAMPLES_EXPONENT 3
 #define OVERSAMPLES (1 << OVERSAMPLES_EXPONENT)
@@ -105,13 +99,12 @@ static const uint8_t adc_pins[] = {
 
 // ADC timing:
 // ADC clock=30Mhz, Tconv=6.5, Tsamp=64.5, total=2.3666us*OVERSAMPLES
-
 struct gpio_adc
 gpio_adc_setup(uint32_t pin)
 {
     // Find pin in adc_pins table
     int chan;
-    uint32_t adc3flg=0;
+    uint32_t adc3flag=0;
     for (chan=0; ; chan++) {
         if (chan >= ARRAY_SIZE(adc_pins))
             shutdown("Not a valid ADC pin");
@@ -123,7 +116,7 @@ gpio_adc_setup(uint32_t pin)
     // (ADC clock 30Mhz)
     ADC_TypeDef *adc;
     if (chan >= 40){   
-        adc3flg = 1;   
+        adc3flag = 1;   
         adc = ADC3;
         if (!is_enabled_pclock(ADC3_BASE)) {
             enable_pclock(ADC3_BASE);
@@ -151,31 +144,29 @@ gpio_adc_setup(uint32_t pin)
         // Switch on voltage regulator
         adc->CR |= ADC_CR_ADVREGEN;
 
-        if (!adc3flg)
+        if (!adc3flag)
         {
             while(!(adc->ISR & ADC_ISR_LDORDY))
                 ;
-            // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
-            MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);
         }
         else
         {
         #ifndef STM32H723xx
             while(!(adc->ISR & ADC_ISR_LDORDY))
                 ;
-            // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
-            MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);     
         #endif
-
         }
+
+        // Set Boost mode for 25Mhz < ADC clock <= 50Mhz
+        MODIFY_REG(adc->CR, ADC_CR_BOOST_Msk, 0b11 << ADC_CR_BOOST_Pos);    
+
         // Calibration
         // Set calibration mode to Single ended (not differential)
         MODIFY_REG(adc->CR, ADC_CR_ADCALDIF_Msk, 0);
 
         // Enable linearity calibration
-        #ifndef STM32H723xx
-            MODIFY_REG(adc->CR, ADC_CR_ADCALLIN_Msk, ADC_CR_ADCALLIN);
-        #endif
+        MODIFY_REG(adc->CR, ADC_CR_ADCALLIN_Msk, ADC_CR_ADCALLIN);
+
         // Start the calibration
         MODIFY_REG(adc->CR, ADC_CR_ADCAL_Msk, ADC_CR_ADCAL);
         while(adc->CR & ADC_CR_ADCAL)
@@ -191,7 +182,7 @@ gpio_adc_setup(uint32_t pin)
 
         // Set 64.5 ADC clock cycles sample time for every channel
         // (Reference manual pg.940)
-        uint32_t aticks = 0b101;        
+        uint32_t aticks = 0b101;                
         // Channel 0-9
         adc->SMPR1 = (aticks        | (aticks << 3)  | (aticks << 6)
                    | (aticks << 9)  | (aticks << 12) | (aticks << 15)
@@ -205,7 +196,7 @@ gpio_adc_setup(uint32_t pin)
         // Disable Continuous Mode
         MODIFY_REG(adc->CFGR, ADC_CFGR_CONT_Msk, 0);
 
-        if (!adc3flg)
+        if (!adc3flag)
         {
             // Set to 12 bit
             MODIFY_REG(adc->CFGR, ADC_CFGR_RES_Msk, 0b110 << ADC_CFGR_RES_Pos);
@@ -273,12 +264,13 @@ gpio_adc_sample(struct gpio_adc g)
         return 0;
     // Conversion started but not ready or wrong channel
     if (adc->CR & ADC_CR_ADSTART)
-        return timer_from_us(10);
+        return timer_from_us(10);                         
     // Start sample
     adc->SQR1 = (g.chan << 6);
     adc->CR |= ADC_CR_ADSTART;
     // Should take 2.3666us, add 1us for clock synchronisation etc.
-    return timer_from_us(1 + 2.3666*OVERSAMPLES);
+    // return timer_from_us(1 + 2.3666*OVERSAMPLES);
+    return timer_from_us(1 + 3.3*OVERSAMPLES);     
 }
 
 // Read a value; use only after gpio_adc_sample() returns zero
