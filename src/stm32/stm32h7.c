@@ -212,6 +212,10 @@ clock_setup(void)
 static void
 usb_reboot_for_dfu_bootloader(void)
 {
+#ifdef STM32H723xx
+    irq_disable();
+    *(uint64_t*)USB_BOOT_FLAG_ADDR = USB_BOOT_FLAG;
+#endif
     irq_disable();
     *(uint64_t*)USB_BOOT_FLAG_ADDR = USB_BOOT_FLAG;
     NVIC_SystemReset();
